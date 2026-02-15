@@ -1,13 +1,12 @@
 package pdc;
 
-/**
- * Message represents the communication unit in the CSM218 protocol.
- * 
- * Requirement: You must implement a custom WIRE FORMAT.
- * DO NOT use JSON, XML, or standard Java Serialization.
- * Use a format that is efficient for the parallel distribution of matrix
- * blocks.
- */
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
 public class Message {
     public String magic;
     public int version;
@@ -16,23 +15,79 @@ public class Message {
     public long timestamp;
     public byte[] payload;
 
-    public Message() {
-    }
+    public Message() {}
 
-    /**
-     * Converts the message to a byte stream for network transmission.
-     * Students must implement their own framing (e.g., length-prefixing).
-     */
     public byte[] pack() {
-        // TODO: Implement custom binary or tag-based framing
-        throw new UnsupportedOperationException("You must design your own wire protocol.");
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(baos);
+
+            writeString(dos, magic);
+            dos.writeInt(version);
+            writeString(dos, type);
+            writeString(dos, sender);
+            dos.writeLong(timestamp);
+
+            if (payload != null) {
+                dos.writeInt(payload.length);
+                dos.write(payload);
+            } else {
+                dos.writeInt(0);
+            }
+
+            dos.flush();
+            return baos.toByteArray();
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to pack message", e);
+        }
     }
 
-    /**
-     * Reconstructs a Message from a byte stream.
-     */
     public static Message unpack(byte[] data) {
-        // TODO: Implement custom parsing logic
-        return null;
+        try {
+            DataInputStream dis = new DataInputStream(
+                    new ByteArrayInputStream(data)
+            );
+
+            Message msg = new Message();
+            msg.magic = readString(dis);
+            msg.version = dis.readInt();
+            msg.type = readString(dis);
+            msg.sender = readString(dis);
+            msg.timestamp = dis.readLong();
+
+            int payloadLength = dis.readInt();
+            if (payloadLength > 0) {
+                msg.payload = new byte[payloadLength];
+                dis.readFully(msg.payload);
+            } else {
+                msg.payload = new byte[0];
+            }
+
+            return msg;
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to unpack message", e);
+        }
+    }
+
+    private static void writeString(DataOutputStream dos, String s) throws IOException {
+        if (s == null) {
+            dos.writeInt(0);
+            return;
+        }
+        byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
+        dos.writeInt(bytes.length);
+        dos.write(bytes);
+    }
+
+    private static String readString(DataInputStream dis) throws IOException {
+        int length = dis.readInt();
+        if (length <= 0) {
+            return "";
+        }
+        byte[] bytes = new byte[length];
+        dis.readFully(bytes);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 }
