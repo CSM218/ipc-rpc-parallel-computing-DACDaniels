@@ -1,21 +1,18 @@
 package pdc;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 
 public class Message {
-    public String magic;
-    public int version;
-    public String type;
+
+    // ===== REQUIRED FIELDS =====
+    public String magic = "PDC";
+    public int version = 1;
+    public String messageType;
+    public String studentId;
     public String sender;
     public long timestamp;
     public byte[] payload;
-
-    public Message() {}
 
     public byte[] pack() {
         try {
@@ -24,7 +21,8 @@ public class Message {
 
             writeString(dos, magic);
             dos.writeInt(version);
-            writeString(dos, type);
+            writeString(dos, messageType);
+            writeString(dos, studentId);
             writeString(dos, sender);
             dos.writeLong(timestamp);
 
@@ -39,35 +37,32 @@ public class Message {
             return baos.toByteArray();
 
         } catch (IOException e) {
-            throw new RuntimeException("Failed to pack message", e);
+            throw new RuntimeException(e);
         }
     }
 
     public static Message unpack(byte[] data) {
         try {
-            DataInputStream dis = new DataInputStream(
-                    new ByteArrayInputStream(data)
-            );
+            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data));
+            Message m = new Message();
 
-            Message msg = new Message();
-            msg.magic = readString(dis);
-            msg.version = dis.readInt();
-            msg.type = readString(dis);
-            msg.sender = readString(dis);
-            msg.timestamp = dis.readLong();
+            m.magic = readString(dis);
+            m.version = dis.readInt();
+            m.messageType = readString(dis);
+            m.studentId = readString(dis);
+            m.sender = readString(dis);
+            m.timestamp = dis.readLong();
 
-            int payloadLength = dis.readInt();
-            if (payloadLength > 0) {
-                msg.payload = new byte[payloadLength];
-                dis.readFully(msg.payload);
-            } else {
-                msg.payload = new byte[0];
+            int len = dis.readInt();
+            if (len > 0) {
+                m.payload = new byte[len];
+                dis.readFully(m.payload);
             }
 
-            return msg;
+            return m;
 
         } catch (IOException e) {
-            throw new RuntimeException("Failed to unpack message", e);
+            throw new RuntimeException(e);
         }
     }
 
@@ -76,18 +71,16 @@ public class Message {
             dos.writeInt(0);
             return;
         }
-        byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
-        dos.writeInt(bytes.length);
-        dos.write(bytes);
+        byte[] b = s.getBytes(StandardCharsets.UTF_8);
+        dos.writeInt(b.length);
+        dos.write(b);
     }
 
     private static String readString(DataInputStream dis) throws IOException {
-        int length = dis.readInt();
-        if (length <= 0) {
-            return "";
-        }
-        byte[] bytes = new byte[length];
-        dis.readFully(bytes);
-        return new String(bytes, StandardCharsets.UTF_8);
+        int len = dis.readInt();
+        if (len == 0) return "";
+        byte[] b = new byte[len];
+        dis.readFully(b);
+        return new String(b, StandardCharsets.UTF_8);
     }
 }
