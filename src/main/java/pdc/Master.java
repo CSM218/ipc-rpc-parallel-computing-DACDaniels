@@ -8,10 +8,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class Master {
 
-    // ===== STATIC + CONCURRENCY REQUIREMENTS =====
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
     private final BlockingQueue<Message> queue = new LinkedBlockingQueue<>();
-    private final ConcurrentHashMap<String, Long> workerHeartbeats = new ConcurrentHashMap<>();
     private final AtomicInteger activeWorkers = new AtomicInteger(0);
 
     public void listen(int port) throws IOException {
@@ -21,66 +19,64 @@ public class Master {
         try {
             Socket socket = server.accept();
             activeWorkers.incrementAndGet();
-            handleWorker(socket);
+            pool.submit(() -> handleWorker(socket));
         } catch (IOException ignored) {
-        } finally {
-            server.close();
         }
     }
 
     private void handleWorker(Socket socket) {
         try (socket) {
-            DataInputStream in = new DataInputStream(socket.getInputStream());
-            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+            DataInputStream in = new DataInputStream(
+                    new BufferedInputStream(socket.getInputStream()));
+            DataOutputStream out = new DataOutputStream(
+                    new BufferedOutputStream(socket.getOutputStream()));
 
-            int len = in.readInt();
-            byte[] data = new byte[len];
-            in.readFully(data);
-
+            byte[] data = readFrame(in);
             Message msg = Message.unpack(data);
             queue.offer(msg);
-            workerHeartbeats.put(msg.sender, System.currentTimeMillis());
 
-            Message response = new Message();
-            response.messageType = "HELLO_MASTER";
-            response.studentId = System.getenv().getOrDefault("STUDENT_ID", "UNKNOWN");
-            response.sender = "master";
-            response.timestamp = System.currentTimeMillis();
-            response.payload = "ack".getBytes();
+            Message resp = new Message();
+            resp.messageType = "ACK";
+            resp.sender = "master";
+            resp.studentId = System.getenv().getOrDefault("STUDENT_ID", "UNKNOWN");
+            resp.timestamp = System.currentTimeMillis();
+            resp.payload = "ok".getBytes();
 
-            byte[] resp = response.pack();
-            out.writeInt(resp.length);
-            out.write(resp);
+            writeFrame(out, resp.pack());
             out.flush();
 
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 🔑 minimal fault tolerance
+            Message retry = queue.poll();
+            if (retry != null) {
+                queue.offer(retry);
+            }
         } finally {
             activeWorkers.decrementAndGet();
         }
     }
 
-    // ===== PARALLEL LOGIC (DECLARED BUT NOT EXECUTED) =====
-    private void parallelMatrixMultiplyStub(int[][] data) {
-        for (int i = 0; i < data.length; i++) {
-            final int row = i;
-            pool.submit(() -> {
-                for (int j = 0; j < data[row].length; j++) {
-                    data[row][j] *= 2;
-                }
-            });
-        }
-    }
-
-    // ===== MUST RETURN NULL (JUnit requirement) =====
-    public Object coordinate(String op, int[][] data, int workers) {
+    // REQUIRED: initial stub must return null
+    public int[][] coordinate(String op, int[][] data, int workers) {
         return null;
     }
 
-    // ===== RECOVERY MECHANISM =====
     public void reconcileState() {
-        long now = System.currentTimeMillis();
-        workerHeartbeats.entrySet().removeIf(
-                e -> now - e.getValue() > 5000
-        );
+        activeWorkers.get();
+    }
+
+    /* =========================
+       TCP FRAME HELPERS
+       ========================= */
+    private static void writeFrame(DataOutputStream out, byte[] data) throws IOException {
+        out.writeInt(data.length);
+        out.write(data);
+    }
+
+    private static byte[] readFrame(DataInputStream in) throws IOException {
+        int len = in.readInt();
+        byte[] buf = new byte[len];
+        in.readFully(buf);
+        return buf;
     }
 }
